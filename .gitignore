@@ -1,0 +1,11 @@
+.venv/
+.cache/
+build/
+dist/
+wheelhouse/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+*.so
+*.pyd
+benchmark-results/

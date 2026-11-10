@@ -1,0 +1,182 @@
+name: CPU reference and CUDA builds
+on:
+  push:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      linux_gpu_test:
+        description: Verify the Linux wheel on a self-hosted Linux GPU runner
+        type: boolean
+        default: false
+
+jobs:
+  reference:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+        python: ['3.10', '3.12', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install ".[test]" --config-settings=cmake.define.HARVEST_CUDA_ENABLE_CUDA=OFF
+      - run: python -m pytest -q -m "not cuda"
+
+  windows-wheel:
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+      - run: python -m pip install uv nanobind "scikit-build-core>=0.11" ninja numpy "cuda-toolkit[nvcc,cudart,cufft,cccl]==13.2.2"
+      - run: python tools/build.py --wheel
+      - name: Check Windows wheel loading with runtime dependencies only
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import venv
+
+          wheel, = Path("dist").glob("*.whl")
+          for runtime in ("13.0.2", None):
+              with tempfile.TemporaryDirectory(prefix="harvest-runtime-", dir=os.environ["RUNNER_TEMP"]) as directory:
+                  venv.create(directory, with_pip=True)
+                  python = str(Path(directory) / "Scripts/python.exe")
+                  constraint = [f"cuda-toolkit[cudart,cufft]=={runtime}"] if runtime else []
+                  subprocess.run([python, "-m", "pip", "install", "--only-binary=:all:",
+                                  str(wheel.resolve()), *constraint], check=True)
+                  env = {k: v for k, v in os.environ.items()
+                         if k.upper() not in ("CUDA_PATH", "CUDACXX", "PYTHONPATH")}
+                  subprocess.run([python, "tests/wheel_smoke.py"], env=env, check=True)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-wheel-${{ matrix.python }}
+          path: dist/*.whl
+          if-no-files-found: error
+      # These standard hosted runners cannot exercise CUDA kernels. Validate a GPU wheel on a
+      # real GPU before release; successful compilation alone is insufficient.
+
+  linux-wheels:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['310', '311', '312']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pypa/cibuildwheel@v4.3.5
+        env:
+          CIBW_BUILD: cp${{ matrix.python }}-manylinux_x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-wheel-cp${{ matrix.python }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  linux-install:
+    needs: linux-wheels
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        cuda: ['latest']
+        include:
+          - python: '3.12'
+            cuda: '13.0.2'
+    # No CUDA Toolkit, NVIDIA driver, or compiler in the consumer image.
+    container: python:${{ matrix.python }}-slim-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-wheel-*
+          path: wheelhouse
+          merge-multiple: true
+      - name: Install only wheels and runtime dependencies
+        shell: python
+        env:
+          CUDA_RUNTIME_VERSION: ${{ matrix.cuda }}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+          abi_tag = "cp312-abi3" if sys.version_info >= (3, 12) else f"{tag}-{tag}"
+          wheel, = Path("wheelhouse").glob(f"*-{abi_tag}-*.whl")
+          runtime = os.environ["CUDA_RUNTIME_VERSION"]
+          constraint = [] if runtime == "latest" else [f"cuda-toolkit[cudart,cufft]=={runtime}"]
+          subprocess.run([sys.executable, "-m", "pip", "install", "--only-binary=:all:",
+                          str(wheel), *constraint], check=True)
+      - run: python tests/wheel_smoke.py
+
+  linux-gpu-install:
+    if: github.event_name == 'workflow_dispatch' && inputs.linux_gpu_test
+    needs: linux-wheels
+    runs-on: [self-hosted, Linux, gpu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-wheel-cp312
+          path: wheelhouse
+      - name: Verify the distribution wheel with runtime dependencies only
+        shell: bash
+        run: |
+          runtime_env=$(mktemp -d "$RUNNER_TEMP/harvest-runtime.XXXXXX")
+          trap 'rm -rf "$runtime_env"' EXIT
+          python -m venv "$runtime_env"
+          for wheel in wheelhouse/*.whl; do
+            "$runtime_env/bin/python" -m pip install --only-binary=:all: "$wheel"
+          done
+          env -u LD_LIBRARY_PATH -u LD_PRELOAD -u PYTHONPATH \
+            "$runtime_env/bin/python" tests/wheel_smoke.py --require-cuda
+
+  windows-abi3-install:
+    needs: windows-wheel
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        python: ['3.13', '3.14']
+        cuda: ['13.0.2', 'latest']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-wheel-3.12
+          path: wheelhouse
+      - name: Check the Python 3.12 stable ABI wheel on a newer interpreter
+        shell: python
+        env:
+          CUDA_RUNTIME_VERSION: ${{ matrix.cuda }}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          wheel, = Path("wheelhouse").glob("*-cp312-abi3-win_amd64.whl")
+          runtime = os.environ["CUDA_RUNTIME_VERSION"]
+          constraint = [] if runtime == "latest" else [f"cuda-toolkit[cudart,cufft]=={runtime}"]
+          subprocess.run([sys.executable, "-m", "pip", "install", "--only-binary=:all:",
+                          str(wheel), *constraint], check=True)
+          subprocess.run([sys.executable, "tests/wheel_smoke.py"], check=True)

@@ -1,0 +1,18 @@
+{
+  "source": "https://files.pythonhosted.org/packages/a5/0f/c78d631ffbb4c1aaebf80ff2bf9e791213b381dbe404f9ce1a3eb3672931/pyworld-0.3.5.tar.gz",
+  "pyworld_version": "0.3.5",
+  "archive_sha256": "1b93e53cddb67a0e4faa34d6cf919ac6c662feb1c8c0ed901d71b595ab396aa3",
+  "files": {
+    "LICENSE.txt": "6921ef0a65a931509b4055075fd847d7257c4094609075dd0615e8e997215f7e",
+    "src/common.cpp": "ef4a982d103bfd4c0efe6f1e6fa1192809e07ac39289f29951f3d95f1af8ca51",
+    "src/fft.cpp": "7a580cc02a0b040bf39de9a841f18b527a711093309ef408c08271abed6eec62",
+    "src/harvest.cpp": "e9e80047a9d9ed3ff8521b966985c0b912ac09415565da1cc821319dc454975e",
+    "src/matlabfunctions.cpp": "250d4cdc31b64cb3bda3a0c988d3853a09e66dd85f15f167161948d938662a4c",
+    "src/world/common.h": "7a761e7d92a3dff74141f73a0bb36ea7af543f314638e4d53be21dfd3d6924d1",
+    "src/world/constantnumbers.h": "ed3d3aec8d0e019db68b3845198bb2c87eedd1cd26a694a830bd57f4d26ba323",
+    "src/world/fft.h": "ac321b81dea5e8118933ecc66d2d9cbfb7721da52892a64d8a4f2e18a65829d6",
+    "src/world/harvest.h": "1ab55206a28236b96e8bdd0f18ddd0ec45ad874217b876ab4a9a2699619e3de2",
+    "src/world/macrodefinitions.h": "6d5417f864a4a4d95b470e72e3cb0114e8c96ba33cc189341e83a9f345e664f0",
+    "src/world/matlabfunctions.h": "192a6be8cf749c147a7b5119b14ad50c5ddbddba9d6c810fbdf64f0dd7dc2af4"
+  }
+}

@@ -1,0 +1,48 @@
+name: GPU compatibility (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      runner_os:
+        description: Self-hosted GPU runner operating system
+        type: choice
+        options: [Linux, Windows]
+        default: Linux
+jobs:
+  test:
+    runs-on: [self-hosted, "${{ inputs.runner_os }}", gpu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - run: python -m pip install uv nanobind "scikit-build-core>=0.11" ninja numpy "cuda-toolkit[nvcc,cudart,cufft,cccl]==13.2.2"
+      - run: python tools/build.py --wheel
+      - name: Test the wheel in a temporary environment
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import venv
+
+          wheels = list(Path("dist").glob("*.whl"))
+          assert len(wheels) == 1, f"Expected one wheel, found {wheels}"
+          with tempfile.TemporaryDirectory(prefix="harvest-wheel-", dir=os.environ["RUNNER_TEMP"]) as directory:
+              environment = Path(directory)
+              venv.create(environment, with_pip=True)
+              scripts = environment / ("Scripts" if os.name == "nt" else "bin")
+              python = str(scripts / ("python.exe" if os.name == "nt" else "python"))
+              subprocess.run([python, "-m", "pip", "install", f"{wheels[0].resolve()}[test]"], check=True)
+              subprocess.run([python, "-c", "from harvest_cuda import cuda_available; assert cuda_available(), 'GPU required'"], check=True)
+              subprocess.run([python, "-m", "pytest", "-q"], check=True)
+              subprocess.run([python, "benchmarks/benchmark.py", "--output", "benchmark-results/gpu.json"], check=True)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpu-results-${{ inputs.runner_os }}
+          path: |
+            dist/*.whl
+            benchmark-results/*.json

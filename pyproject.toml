@@ -1,0 +1,45 @@
+[build-system]
+requires = ["scikit-build-core>=0.11", "nanobind>=2.4"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "harvest-cuda"
+version = "0.1.0"
+description = "CUDA acceleration of WORLD Harvest with a PyWORLD-compatible interface"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.23", "cuda-toolkit[cudart,cufft]>=13.0.2,<14"]
+license = "BSD-3-Clause"
+license-files = ["LICENSE", "third_party/world/LICENSE.txt", "third_party/NOTICES.txt", "third_party/NVIDIA-CUDA-LICENSE.txt"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pyworld==0.3.5", "setuptools<81"]
+
+[tool.scikit-build]
+# Share one wheel across Python 3.12+; 3.10/3.11 retain their native ABI.
+wheel.py-api = "cp312"
+cmake.build-type = "Release"
+wheel.packages = ["python/harvest_cuda"]
+build-dir = "build/{wheel_tag}"
+sdist.include = ["third_party/world/**"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["cuda: requires a working NVIDIA GPU and a CUDA-enabled build"]
+
+[tool.cibuildwheel]
+build = "cp3{10,11,12}-manylinux_x86_64"
+test-command = "python {project}/tests/wheel_smoke.py"
+config-settings = { "cmake.define.HARVEST_CUDA_ENABLE_CUDA" = "ON" }
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+# One toolkit for all Python builds; it is not installed into the test venvs.
+before-all = [
+  "python -m pip install --only-binary=:all: --target /opt/harvest-cuda-toolkit 'cuda-toolkit[nvcc,cudart,cufft,cccl]==13.2.2'",
+  "ln -s libcudart.so.13 /opt/harvest-cuda-toolkit/nvidia/cu13/lib/libcudart.so",
+  "ln -s libcufft.so.12 /opt/harvest-cuda-toolkit/nvidia/cu13/lib/libcufft.so",
+]
+environment = { CUDACXX = "/opt/harvest-cuda-toolkit/nvidia/cu13/bin/nvcc" }
+# CUDA is supplied by runtime dependencies, resolved through the relative RPATH.
+repair-wheel-command = "auditwheel repair --plat manylinux_2_28_x86_64 --exclude libcudart.so.13 --exclude libcufft.so.12 -w {dest_dir} {wheel}"

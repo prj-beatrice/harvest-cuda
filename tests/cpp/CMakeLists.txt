@@ -1,0 +1,21 @@
+cmake_minimum_required(VERSION 3.24)
+project(harvest_native_tests LANGUAGES CXX)
+find_package(Threads REQUIRED)
+add_executable(test_workspace_cache test_workspace_cache.cpp)
+target_compile_features(test_workspace_cache PRIVATE cxx_std_17)
+target_include_directories(test_workspace_cache PRIVATE ../../src)
+target_link_libraries(test_workspace_cache PRIVATE Threads::Threads)
+add_executable(test_cuda_device test_cuda_device.cpp)
+target_compile_features(test_cuda_device PRIVATE cxx_std_17)
+target_include_directories(test_cuda_device PRIVATE fake_cuda ../../src)
+
+add_executable(test_contour test_contour.cpp ../../src/cuda_stub.cpp
+  ../../third_party/world/src/common.cpp ../../third_party/world/src/fft.cpp
+  ../../third_party/world/src/matlabfunctions.cpp)
+target_compile_features(test_contour PRIVATE cxx_std_17)
+target_include_directories(test_contour PRIVATE ../../src ../../third_party/world/src)
+if(MSVC)
+  target_compile_options(test_contour PRIVATE /fp:precise /O2)
+else()
+  target_compile_options(test_contour PRIVATE -ffp-contract=off -O3)
+endif()
